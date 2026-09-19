@@ -41,6 +41,13 @@ Both are published by `.github/workflows/publish-image.yml` on a `vX.Y.Z` tag, a
 passes, and are tagged `X.Y.Z`, `X.Y` and `latest`. The Railway template references them **pinned by
 digest**; the `worker` service uses the stock upstream API image directly.
 
+The published template currently pins:
+
+- `ghcr.io/youssefsiam38/fleetbase-railway-api:1.0.1`
+  - digest `sha256:b69dee37a09d7b9cd5f20d88de9303047801997c6208c996155722877ba321da`
+- `ghcr.io/youssefsiam38/fleetbase-railway-console:1.0.1`
+  - digest `sha256:46180b6f72eaadef2275c0c174433191bff78c4e4e4941d8c966bc1c63964c11`
+
 Because the wrappers derive from an AGPL-3.0 image, everything needed to reproduce them is public:
 upstream's source at the tag above, and the Dockerfiles, Caddyfile and entrypoints in this
 repository. See `THIRD_PARTY_NOTICES.md`.
