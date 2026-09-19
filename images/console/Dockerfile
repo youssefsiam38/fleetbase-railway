@@ -13,6 +13,10 @@ COPY default.conf.template /etc/nginx/templates/default.conf.template
 COPY entrypoint.sh /usr/local/bin/fleetbase-console-entrypoint.sh
 RUN chmod +x /usr/local/bin/fleetbase-console-entrypoint.sh
 
+LABEL org.opencontainers.image.source="https://github.com/youssefsiam38/fleetbase-railway" \
+      org.opencontainers.image.description="Fleetbase Console for Railway" \
+      org.opencontainers.image.licenses="AGPL-3.0-only"
+
 ENV PORT=4200
 
 ENTRYPOINT ["/usr/local/bin/fleetbase-console-entrypoint.sh"]

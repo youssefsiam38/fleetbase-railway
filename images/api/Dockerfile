@@ -18,6 +18,10 @@ COPY Caddyfile /etc/caddy/Caddyfile
 COPY entrypoint.sh /usr/local/bin/fleetbase-railway-entrypoint.sh
 RUN chmod +x /usr/local/bin/fleetbase-railway-entrypoint.sh
 
+LABEL org.opencontainers.image.source="https://github.com/youssefsiam38/fleetbase-railway" \
+      org.opencontainers.image.description="Fleetbase API front door for Railway" \
+      org.opencontainers.image.licenses="AGPL-3.0-only"
+
 ENV PORT=8080 \
     INTERNAL_PORT=8000
 
