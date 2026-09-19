@@ -1,0 +1,128 @@
+# Local test topology for the Fleetbase Railway template.
+# Mirrors the Railway service graph: mysql + redis + socketcluster + api (wrapper) + worker
+# (stock upstream image) + console (wrapper).
+name: fleetbase-railway
+
+services:
+  database:
+    image: mysql:8.0-oracle@sha256:7dcddc01f13bab2f15cde676d44d01f61fc9f99fe7785e86196dfc07d358ae2b
+    command:
+      - "--datadir=/var/lib/mysql/data"
+      - "--bind-address=*"
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-fleetbaselocalrootpw}
+      MYSQL_DATABASE: fleetbase
+    volumes:
+      - dbdata:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-uroot", "-p${MYSQL_ROOT_PASSWORD:-fleetbaselocalrootpw}"]
+      interval: 5s
+      timeout: 5s
+      retries: 60
+
+  cache:
+    image: redis:7-alpine@sha256:520775a41a63e77e06c73e35d2fd9cc15921a609516818796b4ecbb813078bc7
+    command: ["redis-server", "--protected-mode", "no", "--save", ""]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+
+  socket:
+    image: socketcluster/socketcluster:v17.4.0@sha256:3cd5c2dde94eab1d4b4dde7d35a6eb8e5a109e7cb491c6f3964111144557b085
+    platform: linux/amd64
+    environment:
+      SOCKETCLUSTER_WORKERS: "1"
+      SOCKETCLUSTER_BROKERS: "1"
+    ports:
+      - "127.0.0.1:38000:8000"
+
+  api:
+    build:
+      context: ./images/api
+    image: ${FLEETBASE_API_IMAGE:-fleetbase-railway-api:candidate}
+    depends_on:
+      database:
+        condition: service_healthy
+      cache:
+        condition: service_started
+    environment:
+      PORT: "8080"
+      FORWARD_PROTO: http
+      APP_ENV: production
+      APP_DEBUG: "false"
+      APP_KEY: ${APP_KEY:-base64:Zm9vYmFyZm9vYmFyZm9vYmFyZm9vYmFyMTIzNDU2Nzg=}
+      APP_URL: http://localhost:8080
+      APP_NAME: Fleetbase
+      CONSOLE_HOST: http://localhost:4200
+      DATABASE_URL: mysql://root:${MYSQL_ROOT_PASSWORD:-fleetbaselocalrootpw}@database:3306/fleetbase
+      QUEUE_CONNECTION: redis
+      CACHE_DRIVER: redis
+      CACHE_PATH: /fleetbase/api/storage/framework/cache
+      CACHE_URL: tcp://cache
+      REDIS_URL: tcp://cache
+      BROADCAST_DRIVER: socketcluster
+      SOCKETCLUSTER_HOST: socket
+      SOCKETCLUSTER_PORT: "8000"
+      SOCKETCLUSTER_SECURE: "false"
+      LOG_CHANNEL: stdout
+      MAIL_MAILER: log
+      REGISTRY_HOST: https://registry.fleetbase.io
+      OSRM_HOST: https://router.project-osrm.org
+      PUBLIC_ONBOARDING: "false"
+      OWNER_EMAIL: ${OWNER_EMAIL:-owner@kwentra.com}
+      OWNER_PASSWORD: ${OWNER_PASSWORD:?OWNER_PASSWORD must be set for local tests}
+      OWNER_NAME: Fleet Owner
+      ORGANIZATION_NAME: Acme Logistics Group
+    volumes:
+      - storage:/fleetbase/api/storage/app
+    ports:
+      - "127.0.0.1:8080:8080"
+
+  # The worker runs the STOCK upstream image (no wrapper): queue worker + scheduler.
+  worker:
+    image: fleetbase/fleetbase-api:v0.7.63@sha256:b712ca37fda0a72d65beb3bbfef5fad9783e01a212f5f544f704af941af5a17d
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - "go-crond --verbose root:./crontab & exec php artisan queue:work --tries=3 --timeout=120"
+    depends_on:
+      database:
+        condition: service_healthy
+      cache:
+        condition: service_started
+    environment:
+      APP_ENV: production
+      APP_KEY: ${APP_KEY:-base64:Zm9vYmFyZm9vYmFyZm9vYmFyZm9vYmFyMTIzNDU2Nzg=}
+      APP_URL: http://localhost:8080
+      CONSOLE_HOST: http://localhost:4200
+      DATABASE_URL: mysql://root:${MYSQL_ROOT_PASSWORD:-fleetbaselocalrootpw}@database:3306/fleetbase
+      QUEUE_CONNECTION: redis
+      CACHE_DRIVER: redis
+      CACHE_PATH: /fleetbase/api/storage/framework/cache
+      CACHE_URL: tcp://cache
+      REDIS_URL: tcp://cache
+      BROADCAST_DRIVER: socketcluster
+      SOCKETCLUSTER_HOST: socket
+      SOCKETCLUSTER_PORT: "8000"
+      LOG_CHANNEL: stdout
+      MAIL_MAILER: log
+    volumes:
+      - storage:/fleetbase/api/storage/app
+
+  console:
+    build:
+      context: ./images/console
+    image: ${FLEETBASE_CONSOLE_IMAGE:-fleetbase-railway-console:candidate}
+    environment:
+      PORT: "4200"
+      API_HOST: http://localhost:8080
+      SOCKETCLUSTER_HOST: localhost
+      SOCKETCLUSTER_PORT: "38000"
+      SOCKETCLUSTER_SECURE: "false"
+    ports:
+      - "127.0.0.1:4200:4200"
+
+volumes:
+  dbdata:
+  storage:

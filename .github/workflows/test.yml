@@ -1,0 +1,44 @@
+name: test
+
+on:
+  push:
+    branches: ['**']
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      OWNER_PASSWORD: ci-only-owner-Pw1!aZ9qXk
+      OWNER_EMAIL: owner@kwentra.com
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Static checks
+        run: tests/static.sh
+
+      - name: Pull upstream images
+        run: docker compose pull --ignore-buildable
+
+      - name: Build wrapper images
+        run: docker compose build
+
+      - name: Smoke tests
+        run: tests/smoke.sh
+
+      - name: Persistence tests
+        run: tests/persistence.sh
+
+      - name: Container logs on failure
+        if: failure()
+        run: docker compose logs --no-color --tail 200 || true
+
+      - name: Tear down
+        if: always()
+        run: docker compose down -v --remove-orphans || true

@@ -1,0 +1,86 @@
+name: publish-image
+
+on:
+  push:
+    tags: ['v[0-9]+.[0-9]+.[0-9]+']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  API_IMAGE: ghcr.io/${{ github.repository }}-api
+  CONSOLE_IMAGE: ghcr.io/${{ github.repository }}-console
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    permissions:
+      contents: read
+      packages: write
+    env:
+      OWNER_PASSWORD: ci-only-owner-Pw1!aZ9qXk
+      OWNER_EMAIL: owner@kwentra.com
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Static checks
+        run: tests/static.sh
+
+      - name: Resolve wrapper version
+        id: ver
+        run: |
+          if [[ "${GITHUB_REF}" == refs/tags/v* ]]; then v="${GITHUB_REF#refs/tags/v}"; else v="0.0.0-${GITHUB_SHA::7}"; fi
+          echo "version=$v" >> "$GITHUB_OUTPUT"
+
+      - name: Build the candidates
+        run: docker compose build --pull
+
+      - name: Smoke tests against the candidates
+        run: tests/smoke.sh
+
+      - name: Persistence tests against the candidates
+        run: tests/persistence.sh
+
+      - name: Container logs on failure
+        if: failure()
+        run: docker compose logs --no-color --tail 200 || true
+
+      - name: Tear down test stack
+        if: always()
+        run: docker compose down -v --remove-orphans || true
+
+      - name: Log in to GHCR
+        uses: docker/login-action@184bdaa0721073962dff0199f1fb9940f07167d1 # v3.5.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Push the API wrapper
+        env:
+          VERSION: ${{ steps.ver.outputs.version }}
+        run: |
+          set -euo pipefail
+          minor="${VERSION%.*}"
+          docker tag fleetbase-railway-api:candidate "$API_IMAGE:$VERSION"
+          docker tag fleetbase-railway-api:candidate "$API_IMAGE:$minor"
+          docker tag fleetbase-railway-api:candidate "$API_IMAGE:latest"
+          docker push "$API_IMAGE:$VERSION"
+          docker push "$API_IMAGE:$minor"
+          docker push "$API_IMAGE:latest"
+
+      - name: Push the console wrapper
+        env:
+          VERSION: ${{ steps.ver.outputs.version }}
+        run: |
+          set -euo pipefail
+          minor="${VERSION%.*}"
+          docker tag fleetbase-railway-console:candidate "$CONSOLE_IMAGE:$VERSION"
+          docker tag fleetbase-railway-console:candidate "$CONSOLE_IMAGE:$minor"
+          docker tag fleetbase-railway-console:candidate "$CONSOLE_IMAGE:latest"
+          docker push "$CONSOLE_IMAGE:$VERSION"
+          docker push "$CONSOLE_IMAGE:$minor"
+          docker push "$CONSOLE_IMAGE:latest"

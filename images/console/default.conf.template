@@ -1,0 +1,30 @@
+server {
+    listen       ${PORT};
+    listen       [::]:${PORT};
+    server_name  _;
+
+    location = /healthz {
+        default_type text/plain;
+        return 200 'ok';
+    }
+
+    location / {
+        root   /usr/share/nginx/html;
+        try_files $uri $uri/ /index.html =404;
+    }
+
+    # Runtime configuration (API host, realtime socket) — never cached, so a redeploy with new
+    # values takes effect immediately.
+    location = /fleetbase.config.json {
+        root /usr/share/nginx/html;
+        default_type application/json;
+        add_header Cache-Control "no-cache, no-store, must-revalidate";
+        add_header Pragma "no-cache";
+        add_header Expires 0;
+        try_files /fleetbase.config.json @config_fallback;
+    }
+
+    location @config_fallback {
+        return 200 '{}';
+    }
+}
