@@ -5,8 +5,8 @@
 #   1. validate the environment the upstream app needs to boot,
 #   2. start the Caddy front door immediately (so Railway's /healthz check passes during the slow
 #      first-boot migration),
-#   3. run the upstream deploy script (migrations, seeds, permissions) and start Laravel Octane on
-#      loopback,
+#   3. wait for the database, run the upstream deploy script (migrations, seeds, permissions) and
+#      start Laravel Octane on loopback,
 #   4. create the owner account once, over loopback, from OWNER_EMAIL/OWNER_PASSWORD.
 #
 # Secrets are never echoed and never passed on argv: the onboarding payload is written to a
@@ -30,6 +30,7 @@ OWNER_NAME="${OWNER_NAME:-Fleet Owner}"
 OWNER_PHONE="${OWNER_PHONE:-+12025550123}"
 ORGANIZATION_NAME="${ORGANIZATION_NAME:-Fleet Operations}"
 PUBLIC_ONBOARDING="${PUBLIC_ONBOARDING:-false}"
+DB_WAIT_SECONDS="${DB_WAIT_SECONDS:-600}"
 
 # The front door blocks public self-signup unless the deployer opens it on purpose.
 if [ "$PUBLIC_ONBOARDING" = "true" ]; then
@@ -51,6 +52,38 @@ mkdir -p /fleetbase/api/storage/app /fleetbase/api/storage/framework/cache /flee
 chown -R www-data:www-data /fleetbase/api/storage 2>/dev/null || true
 
 api_url() { printf 'http://127.0.0.1:%s%s' "$INTERNAL_PORT" "$1"; }
+
+# Stop the container (and let Railway restart it) when the app cannot run.
+fail_container() {
+	log "ERROR: $1"
+	kill 1 2>/dev/null || true
+	exit 1
+}
+
+db_reachable() {
+	php -r '
+		$url = parse_url(getenv("DATABASE_URL"));
+		if (!$url || empty($url["host"])) { exit(1); }
+		$dsn = sprintf("mysql:host=%s;port=%d", $url["host"], isset($url["port"]) ? $url["port"] : 3306);
+		try {
+			new PDO($dsn, isset($url["user"]) ? $url["user"] : "root", isset($url["pass"]) ? $url["pass"] : "",
+				[PDO::ATTR_TIMEOUT => 5]);
+		} catch (Throwable $e) {
+			exit(1);
+		}
+	' >/dev/null 2>&1
+}
+
+wait_for_database() {
+	waited=0
+	until db_reachable; do
+		[ "$waited" -lt "$DB_WAIT_SECONDS" ] || return 1
+		[ $((waited % 60)) -eq 0 ] && log "waiting for the database to accept connections"
+		sleep 10
+		waited=$((waited + 10))
+	done
+	log "database is reachable"
+}
 
 bootstrap_owner() {
 	# Wait for Octane to answer on loopback (migrations + seeds run first and are slow).
@@ -101,11 +134,16 @@ bootstrap_owner() {
 start_app() {
 	cd /fleetbase/api
 
+	wait_for_database || fail_container "the database did not become reachable within ${DB_WAIT_SECONDS}s"
+
 	log "running database migrations and seeds (first boot can take several minutes)"
-	if ! ./deploy.sh; then
-		log "ERROR: deploy.sh failed; the API will not start"
-		exit 1
-	fi
+	attempt=1
+	until ./deploy.sh; do
+		[ "$attempt" -lt 3 ] || fail_container "deploy.sh failed ${attempt} times"
+		attempt=$((attempt + 1))
+		log "deploy.sh failed; retrying (attempt ${attempt})"
+		sleep 15
+	done
 
 	log "starting Laravel Octane on 127.0.0.1:${INTERNAL_PORT}"
 	php artisan octane:frankenphp --max-requests=1000 --port="$INTERNAL_PORT" --host=127.0.0.1 &
@@ -114,8 +152,7 @@ start_app() {
 	bootstrap_owner &
 
 	wait "$OCTANE_PID"
-	log "ERROR: Octane exited; stopping the container so Railway restarts it"
-	kill 1 2>/dev/null || true
+	fail_container "Octane exited"
 }
 
 start_app &
