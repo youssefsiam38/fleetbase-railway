@@ -96,8 +96,8 @@ login_code() {
   printf '%s' "$code"
 }
 
-# login -> prints the owner's bearer token (empty on failure)
-login() {
+# login_once -> prints the owner's bearer token (empty on failure)
+login_once() {
   local body="$TEST_TMP/login.json" out="$TEST_TMP/login-out.json"
   login_body "$OWNER_EMAIL" "$OWNER_PASSWORD" "$body"
   curl -s -o "$out" --max-time 60 -X POST "$API_URL/int/v1/auth/login" \
@@ -110,6 +110,20 @@ try:
 except Exception:
     print("")
 ' "$out"
+}
+
+# login -> prints the owner's bearer token, retrying briefly.
+# The onboarding endpoint creates the organization BEFORE the user row, so should-onboard can flip
+# to false a moment before the owner's credentials are usable; retry instead of failing that race.
+login() {
+  local timeout=${1:-120} start token
+  start=$(date +%s)
+  while :; do
+    token="$(login_once)"
+    [ -n "$token" ] && { printf '%s' "$token"; return 0; }
+    [ $(( $(date +%s) - start )) -ge "$timeout" ] && { printf ''; return 1; }
+    sleep 5
+  done
 }
 
 api_get()  { curl -s --max-time 60 -H "Authorization: Bearer $TOKEN" -H 'Accept: application/json' "$API_URL$1"; }
